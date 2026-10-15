@@ -1,125 +1,146 @@
 # Bota o Shape API
 
-API do Bota o Shape, construída com Django e Django REST Framework. O código da aplicação fica em `src/`.
+Backend multi-tenant do **Bota o Shape!**, uma plataforma SaaS B2B para academias. A academia é a contratante; professores, nutricionistas e alunos usam o produto por vínculos e permissões do tenant. O aluno entra por convite e não possui checkout ou assinatura individual.
 
-## Requisitos
+O projeto usa Django, Django REST Framework, PostgreSQL, JWT rotativo e OpenAPI. Cada recurso de negócio pertence a uma academia e toda API de domínio resolve o tenant ativo pelo vínculo autenticado e pelo cabeçalho `X-Tenant-ID`; um `tenant_id` arbitrário enviado no payload não concede acesso.
 
-- Python 3.14 ou superior;
-- [uv](https://docs.astral.sh/uv/) para instalar as dependências e executar os comandos;
-- PostgreSQL e Redis somente se você optar pelas integrações correspondentes.
+## Escopo implementado
 
-## Início rápido
+- **Identidade e tenancy:** academias, unidades, usuário UUID, memberships multi-CNPJ, papéis acumuláveis, atribuições profissional/aluno, consentimentos, convite de uso único, recuperação de senha e auditoria.
+- **Treinos:** equipamentos separados de exercícios, músculos, variações, mídia, modelos com dias/exercícios/séries, observação do professor por exercício, nota por série, publicação versionada, atribuição e execução idempotente.
+- **Avaliações:** protocolos configuráveis, medidas brutas, sítio/lado/unidade/método, condições de coleta e relatórios que só comparam medições compatíveis.
+- **Nutrição:** perfil e diário do aluno, hidratação, mensagens, plano qualitativo ou catalogado e versões imutáveis. Publicação exige papel de nutricionista, vínculo com o aluno, consentimento e CRN/UF verificado.
+- **Composição alimentar:** fontes e lotes rastreáveis, alimentos e preparo, nutrientes por 100 g, medidas caseiras documentadas, receitas por rendimento e snapshots históricos. Valores ausentes continuam ausentes.
+- **Cobrança B2B:** planos globais configuráveis, assinatura por academia, faturas, tentativas, eventos idempotentes e entitlements. A integração externa usa um adapter e permanece desabilitada até um provedor ser configurado.
+- **Proteção:** soft delete de memberships, dados de saúde imutáveis após publicação/conclusão, rate limit, uploads limitados, headers de segurança, logs sem payloads sensíveis e pedidos auditáveis de exportação/exclusão.
 
-Em um repositório novo, copie os arquivos desta base. Ajuste o nome do projeto em `pyproject.toml`, `APP_NAME` em `local.env` e a descrição deste README. Então, na raiz do projeto:
+O backend não gera treinos, dietas, metas, diagnósticos ou progressão por algoritmo. Dados de composição são estimativas descritivas; a prescrição e a interpretação continuam sob responsabilidade profissional.
+
+## Requisitos e início rápido
+
+- Python 3.14+
+- [uv](https://docs.astral.sh/uv/)
+- PostgreSQL 16+
+- Redis 7+ apenas para cache/Celery quando habilitado
+
+Suba os serviços locais, instale as dependências e prepare o banco:
 
 ```sh
 cp local.env .env
-uv sync --group test
-uv run python src/manage.py check
-uv run python src/manage.py makemigrations user
+docker compose up -d postgres redis
+uv sync --extra postgres --group test
 uv run python src/manage.py migrate
-uv run pytest -c src/pytest.ini src/tests
+uv run python src/manage.py createsuperuser
 uv run python src/manage.py runserver
 ```
 
-O servidor de desenvolvimento usa `http://127.0.0.1:8000/`. Acesse `/api/core/health/` para verificar se a aplicação responde. Para usar o admin em `/admin/`, crie um superusuário com `uv run python src/manage.py createsuperuser` após aplicar as migrações.
+A API inicia em `http://127.0.0.1:8000`. Os endpoints públicos principais são:
 
-**Gere e versione `src/apps/user/migrations/0001_initial.py` antes da primeira migração do banco.** O boilerplate define `AUTH_USER_MODEL = "user.User"` e não inclui migrações. Mudar o modelo de usuário depois de criar as tabelas exige uma migração mais complexa. Execute `makemigrations user` antes de `migrate` e dos testes que acessam o banco.
+| Endpoint | Uso |
+| --- | --- |
+| `GET /api/core/health/` | Health check |
+| `POST /api/tenancy/owner/register/` | Cria owner, tenant e piloto inicial sem preço fixo |
+| `POST /api/user/auth/token/` | Login por e-mail/senha |
+| `POST /api/user/auth/token/refresh/` | Rotaciona refresh token |
+| `POST /api/user/auth/token/revoke/` | Revoga refresh token |
+| `POST /api/tenancy/memberships/invite/` | Convida equipe ou aluno |
+| `POST /api/tenancy/invitations/accept/` | Aceita convite de uso único |
+| `GET /api/schema/` | OpenAPI JSON |
+| `GET /api/docs/` | Swagger UI |
 
-## Estrutura
+Exemplo de uma chamada autenticada em uma academia:
 
-```text
-botaoshape-api/
-├── .gitignore
-├── Makefile
-├── README.md
-├── local.env
-├── pyproject.toml
-├── uv.lock
-└── src/
-    ├── apps/
-    │   ├── core/             # Modelo abstrato com timestamps e health check
-    │   └── user/             # Modelo de usuário, admin e API
-    ├── django_settings/      # Configuração, URLs, ASGI, WSGI e Celery
-    ├── frontend/
-    │   ├── static/           # Arquivos CSS, JS e imagens de origem
-    │   └── templates/        # Templates HTML
-    ├── locale/               # Traduções
-    ├── tests/test_smoke.py
-    ├── .coveragerc
-    ├── manage.py
-    └── pytest.ini
+```sh
+curl http://127.0.0.1:8000/api/workouts/assignments/ \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "X-Tenant-ID: $TENANT_ID"
 ```
 
-`src/frontend/media/` guarda uploads em execução; `src/staticfiles/` recebe a saída de `collectstatic`. Ambas são ignoradas no Git. O pacote de configuração chama-se `django_settings`. Se você o renomear, atualize as referências em `manage.py`, `asgi.py`, `wsgi.py`, `celery.py`, `pytest.ini` e `settings.py`.
+Se a conta tiver apenas um membership ativo, o tenant pode ser inferido. Para contas com mais de uma academia, o cabeçalho é obrigatório. IDs de objetos de outro tenant retornam negação ou não são encontrados.
 
-## Recursos disponíveis
+## Papéis e regras centrais
 
-| Recurso | Comportamento |
+| Papel/escopo | Capacidades |
 | --- | --- |
-| `GET /api/core/health/` | Retorna `{"status": "ok"}` sem autenticação. |
-| `/api/user/users/` | Lista, consulta, cria e atualiza usuários. Todas as ações exigem `is_staff`; não há cadastro público nem exclusão pela API. |
-| `User(AbstractUser)` | Modelo customizado registrado no admin. A criação e a atualização pela API validam a senha e a armazenam por hash. |
-| Django REST Framework | Autenticação por sessão e permissão de usuário autenticado por padrão; paginação, busca, ordenação e filtros configurados. |
-| Banco, cache e arquivos | SQLite, cache em memória e arquivos locais por padrão; PostgreSQL e Redis podem ser configurados por ambiente. |
-| Celery | Aplicação configurada e autodiscovery de tarefas; requer um broker em execução para processá-las. |
-| Django Celery Logs | Registra execuções e falhas das tarefas no banco e permite consultá-las no admin. |
+| `owner` / `admin` | Unidades, memberships e operações profissionais permitidas no tenant |
+| `coach` | Catálogo, treino e avaliação de alunos atribuídos |
+| `dietitian` | Nutrição de alunos atribuídos; publicar exige CRN/UF verificado |
+| `student` | Somente os próprios treinos, avaliações liberadas, plano ativo e registros |
+| `billing.manage` | Assinatura, portal e faturas da academia |
 
-O `core` também fornece `TimestampedModel`, uma classe abstrata opcional com `created_at` e `updated_at`. As URLs registram apenas o admin padrão e as duas apps iniciais. A base não traz `admin_custom.py`, tarefas de domínio ou integrações privadas do Hydrostats.
+Uma pessoa pode acumular `coach` e `dietitian`. O papel administrativo não substitui habilitação clínica. Consentimento e atribuição ativa são checados em operações sensíveis.
+
+## Desenvolvimento
+
+```sh
+make check       # checks do Django
+make lint        # Ruff
+make format      # formatação Ruff
+make migrations  # confirma que não faltam migrations
+make test        # pytest, cobertura e execução paralela
+```
+
+Para testar com SQLite isoladamente:
+
+```sh
+DATABASE_URL=sqlite:////tmp/botaoshape-test.sqlite3 uv run pytest -c src/pytest.ini src/tests -n 0
+```
+
+A suíte cobre isolamento de tenant, JWT/onboarding, convite sem cobrança de aluno, permissões, versões de treino e plano alimentar, observações por exercício/série, idempotência, comparação de medidas, snapshots alimentares e bloqueios de cobrança. A cobertura mínima configurada é 60%.
 
 ## Configuração
 
-`local.env` é um exemplo: copie-o para `.env` e ajuste os valores. O arquivo `.env` não deve ser versionado. As variáveis já definidas no processo têm precedência sobre o arquivo.
+As variáveis do processo têm precedência sobre `.env`.
 
-| Variável | Uso |
+| Variável | Descrição |
 | --- | --- |
-| `SECRET_KEY` | Obrigatória. Substitua a chave de desenvolvimento antes de publicar; a aplicação recusa chaves iniciadas por `django-insecure-` com `DEBUG=False`. |
-| `DEBUG`, `ENVIRONMENT`, `APP_NAME`, `APP_VERSION` | Modo de desenvolvimento e identificação da aplicação. `DEBUG` é falso por padrão. |
-| `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `CORS_ALLOWED_ORIGINS`, `CORS_ALLOW_CREDENTIALS` | Hosts e origens permitidos. Listas usam valores separados por vírgula. |
-| `DATABASE_URL`, `DB_CONN_MAX_AGE` | Banco de dados e persistência de conexões. Sem URL, usa SQLite na raiz. |
-| `CACHE_URL` | Habilita cache Redis; sem URL, usa cache em memória. |
-| `CELERY_BROKER_URL` | Broker das tarefas. O padrão é `redis://localhost:6379/0`. Os resultados do Celery são ignorados; o histórico fica no Django Celery Logs. |
-| `LANGUAGE_CODE`, `TIME_ZONE`, `API_PAGE_SIZE` | Idioma, fuso horário e tamanho da página da API. |
-| `STATIC_URL`, `MEDIA_URL` | URLs de arquivos estáticos e uploads. |
-| `SECURE_SSL_REDIRECT`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SECURE_HSTS_SECONDS`, `SECURE_HSTS_INCLUDE_SUBDOMAINS`, `SECURE_HSTS_PRELOAD` | Opções de HTTPS e cookies para o ambiente de implantação. |
-| `EMAIL_BACKEND`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`, `DEFAULT_FROM_EMAIL`, `LOG_LEVEL` | E-mail e nível dos logs. |
+| `SECRET_KEY`, `DEBUG`, `ENVIRONMENT` | Segurança e ambiente Django |
+| `DATABASE_URL`, `DB_CONN_MAX_AGE` | PostgreSQL (SQLite é o fallback do código) |
+| `CACHE_URL`, `CELERY_BROKER_URL` | Redis/cache e tarefas assíncronas |
+| `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `CORS_ALLOWED_ORIGINS` | Hosts e origens permitidas |
+| `JWT_ACCESS_MINUTES`, `JWT_REFRESH_DAYS` | Validade de access/refresh; refresh é rotativo e revogável |
+| `PASSWORD_RESET_TIMEOUT` | Expiração de redefinição de senha em segundos |
+| `API_PAGE_SIZE`, `API_USER_RATE` | Paginação e rate limit por usuário |
+| `MAX_UPLOAD_BYTES` | Limite global recebido pelo Django; mídia também valida extensão |
+| `EMAIL_*`, `DEFAULT_FROM_EMAIL` | Entrega de convite e redefinição |
+| `USDA_API_KEY` | Chave server-side para a integração FoodData Central quando habilitada |
+| `SECURE_*`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE` | HTTPS, cookies e HSTS |
 
-Para PostgreSQL, instale o extra e defina `DATABASE_URL` antes de executar as migrações:
+Nunca coloque segredos no app Flutter, painel Next.js ou repositório. O adapter de cobrança padrão recusa checkout, portal e webhook; configure e teste um provedor hospedado antes de ativar self-service. Número completo de cartão e CVV não pertencem a este banco.
 
-```sh
-uv sync --extra postgres --group test
+## Organização
+
+```text
+src/apps/
+├── core/          # UUID/timestamps, auditoria e direitos do titular
+├── user/          # usuário, JWT e recuperação de senha
+├── tenancy/       # tenant, unidade, memberships, papéis, vínculos e consentimento
+├── workouts/      # catálogo, prescrição, atribuição e execução
+├── assessments/   # protocolos, medidas e relatórios compatíveis
+├── food/          # fontes, alimentos, nutrientes, medidas e receitas
+├── nutrition/     # planos versionados, diário, hidratação e mensagens
+└── billing/       # planos, assinatura, faturas, eventos e entitlements
 ```
 
-Redis só é necessário quando `CACHE_URL` aponta para ele ou quando tarefas Celery usam um broker Redis. Antes de publicar, configure a chave secreta, hosts, origens e opções de HTTPS para o ambiente; execute `uv run python src/manage.py check --deploy` e `uv run python src/manage.py collectstatic`. A publicação dos arquivos estáticos e de mídia depende da infraestrutura escolhida.
+Mídia local fica em `src/frontend/media/` e não é versionada. Em produção, use storage privado/CDN com URLs assinadas e varredura de arquivos. Celery deve ser mantido apenas para tarefas assíncronas reais, como importações grandes ou notificações.
 
-Para registrar tarefas com o [Django Celery Logs](https://github.com/rhenter/django-celery-logs), aplique as migrações e inicie um worker com o broker em execução:
+## Catálogo alimentar e licenças
 
-```sh
-uv run python src/manage.py migrate
-uv run celery --workdir src -A django_settings worker --loglevel=info
-```
+TBCA é a fonte prioritária para itens brasileiros, mas este repositório não automatiza sua coleta nem redistribui dados. Formato, licença, atribuição e condições de uso ainda precisam de validação formal antes de importar um lote. USDA FoodData Central pode ser usado como complemento pela API oficial; a chave deve permanecer no backend, com cache, rate limit, rastreabilidade e tratamento de indisponibilidade.
 
-As execuções aparecem no admin em `/admin/`. A biblioteca fornece `clear_celery_task_logs` para limpar registros antigos; agende essa tarefa se precisar de retenção automática e configure `CELERY_TASK_LOGS_EXPIRES` com o número de dias desejado. O boilerplate usa `CELERY_TASK_IGNORE_RESULT = True`, portanto código que consulte `AsyncResult` precisará de um backend de resultados próprio.
+Alimento cru, cozido ou preparado é um registro distinto. Medida caseira só existe quando há conversão documentada para aquele item. O cálculo usa `valor_por_100g × gramas_comestíveis ÷ 100`; receitas somam ingredientes e dividem pelo rendimento final. Diário e plano guardam o snapshot, a fonte e a versão usados.
 
-## Comandos de desenvolvimento
+## Pendências antes de produção
 
-O `Makefile` oferece os mesmos comandos do início rápido:
+Este código fornece controles técnicos, mas ainda requer trabalho operacional e jurídico:
 
-| Alvo | Ação |
-| --- | --- |
-| `make deps` | Instala as dependências com o grupo de testes. |
-| `make check` | Executa as verificações do Django. |
-| `make migrations` | Gera migrações da app `user`. |
-| `make migrate` | Aplica as migrações. |
-| `make test` | Executa `pytest -c src/pytest.ini src/tests`. |
-| `make run` | Inicia o servidor de desenvolvimento. |
+- avaliação LGPD, bases legais, finalidades, retenção, anonimização e atendimento ao titular;
+- política específica para menores; o MVP deve permanecer 18+ até essa governança existir;
+- contratos com operadores, encarregado/canal, resposta a incidentes e backups restaurados em teste;
+- revisão profissional de conteúdo de treino, protocolos e nutrição;
+- validação das licenças TBCA/USDA e direitos de mídia;
+- implementação do provedor de cobrança, verificação criptográfica real de webhook e conciliação;
+- storage privado, antivírus, URLs assinadas, observabilidade sem dados de saúde e testes de carga;
+- política contratual de carência, exportação, cancelamento e retenção por inadimplência.
 
-Os testes usam execução paralela, reutilização do banco e cobertura mínima de 60% sobre `apps`, conforme `src/pytest.ini` e `src/.coveragerc`.
-
-## Adaptação da base
-
-Adicione apps, dependências e serviços de domínio conforme as necessidades do novo projeto. Se não usar Celery, remova `src/django_settings/celery.py`, sua importação em `src/django_settings/__init__.py`, as opções `CELERY_*` em `settings.py`, a app `django_celery_logs` de `INSTALLED_APPS` e as dependências de Celery e Django Celery Logs do `pyproject.toml`.
-
-Quando validada em um projeto novo, esta base pode ser guardada em um [repositório template do GitHub](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-template-repository). Uma skill pode orientar a criação do repositório, a troca de identificadores, a seleção de integrações e as verificações, apontando para o template como fonte única do código inicial.
-
-Referências: [modelo de usuário customizado no Django](https://docs.djangoproject.com/en/6.1/topics/auth/customizing/) e [skills na documentação da OpenAI](https://developers.openai.com/plugins/build/skills).
+Dados sensíveis não devem ser enviados a analytics ou LLMs. Eventos de auditoria registram ações e metadados mínimos, sem copiar medidas, refeições, fotos, tokens ou senhas.
