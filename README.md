@@ -128,6 +128,19 @@ Mídia local fica em `src/frontend/media/` e não é versionada. Em produção, 
 
 TBCA é a fonte prioritária para itens brasileiros, mas este repositório não automatiza sua coleta nem redistribui dados. Formato, licença, atribuição e condições de uso ainda precisam de validação formal antes de importar um lote. USDA FoodData Central pode ser usado como complemento pela API oficial; a chave deve permanecer no backend, com cache, rate limit, rastreabilidade e tratamento de indisponibilidade.
 
+Após obter um arquivo oficial e autorização compatível com o uso do produto, normalize-o como CSV UTF-8 com uma linha por alimento/nutriente. As colunas obrigatórias são `external_id`, `name`, `nutrient_code`, `nutrient_name`, `nutrient_unit` e `value_per_100g`; também são aceitas `preparation_state`, `edible_description`, `branded` e `data_type`. Valores ausentes podem ser representados por vazio, `-`, `NA`, `N/A`, `ND` ou `TR` e não são convertidos em zero.
+
+```sh
+uv run python src/manage.py import_food_table dados/tbca-7.3.csv \
+  --source tbca \
+  --source-version 7.3 \
+  --attribution-url https://www.tbca.net.br/ \
+  --license-status approved \
+  --activate
+```
+
+Sem `--activate`, a fonte é importada desabilitada para permitir validação antes de aparecer no catálogo. O comando aceita CSV separado por vírgula ou ponto e vírgula, calcula o checksum do arquivo, registra `FoodImportBatch` e pode ser executado novamente sem duplicar alimentos ou nutrientes.
+
 Alimento cru, cozido ou preparado é um registro distinto. Medida caseira só existe quando há conversão documentada para aquele item. O cálculo usa `valor_por_100g × gramas_comestíveis ÷ 100`; receitas somam ingredientes e dividem pelo rendimento final. Diário e plano guardam o snapshot, a fonte e a versão usados.
 
 ## Pendências antes de produção
