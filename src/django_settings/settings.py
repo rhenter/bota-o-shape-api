@@ -1,12 +1,12 @@
 """Reusable settings based on the original project's configuration layout."""
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
-
 
 SRC_DIR = Path(__file__).resolve().parents[1]
 BASE_DIR = SRC_DIR.parent
@@ -65,9 +65,17 @@ INSTALLED_APPS = [
     "django_filters",
     "corsheaders",
     "rest_framework",
+    "rest_framework_simplejwt.token_blacklist",
+    "drf_spectacular",
     "django_celery_logs",
     "apps.core.apps.CoreConfig",
     "apps.user.apps.UserConfig",
+    "apps.tenancy.apps.TenancyConfig",
+    "apps.workouts.apps.WorkoutsConfig",
+    "apps.assessments.apps.AssessmentsConfig",
+    "apps.food.apps.FoodConfig",
+    "apps.nutrition.apps.NutritionConfig",
+    "apps.billing.apps.BillingConfig",
 ]
 
 MIDDLEWARE = [
@@ -114,6 +122,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # API defaults
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
@@ -127,7 +136,31 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ],
     "TEST_REQUEST_DEFAULT_FORMAT": "json",
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "user": os.getenv("API_USER_RATE", "600/hour"),
+        "anon": os.getenv("API_ANON_RATE", "100/hour"),
+    },
 }
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Bota o Shape API",
+    "DESCRIPTION": "API multi-tenant para academias, profissionais e alunos.",
+    "VERSION": APP_VERSION,
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.getenv("JWT_ACCESS_MINUTES", "15"))),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.getenv("JWT_REFRESH_DAYS", "7"))),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "UPDATE_LAST_LOGIN": True,
+}
+
+PASSWORD_RESET_TIMEOUT = int(os.getenv("PASSWORD_RESET_TIMEOUT", "3600"))
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS")
 
@@ -138,6 +171,7 @@ STATICFILES_DIRS = [FRONTEND_DIR / "static"]
 STATIC_ROOT = SRC_DIR / "staticfiles"
 MEDIA_URL = os.getenv("MEDIA_URL", "/media/")
 MEDIA_ROOT = FRONTEND_DIR / "media"
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
@@ -181,7 +215,8 @@ CELERY_TIMEZONE = TIME_ZONE
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND",
     "django.core.mail.backends.console.EmailBackend"
-    if DEBUG else "django.core.mail.backends.smtp.EmailBackend",
+    if DEBUG
+    else "django.core.mail.backends.smtp.EmailBackend",
 )
 EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "25"))
@@ -202,3 +237,7 @@ LOGGING = {
     },
     "root": {"handlers": ["console"], "level": LOG_LEVEL},
 }
+
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
+REFERRER_POLICY = "same-origin"

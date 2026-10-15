@@ -1,13 +1,19 @@
-.PHONY: deps check migrations migrate run test
+.PHONY: deps check format lint migrations migrate run test
 
 deps:
-	uv sync --group test
+	uv sync --extra postgres --group test
 
 check:
 	uv run python src/manage.py check
 
+format:
+	uv run ruff format src
+
+lint:
+	uv run ruff check src
+
 migrations:
-	uv run python src/manage.py makemigrations user
+	uv run python src/manage.py makemigrations --check
 
 migrate:
 	uv run python src/manage.py migrate

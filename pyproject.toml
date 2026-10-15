@@ -11,9 +11,21 @@ dependencies = [
     "django-filter>=26.2,<27",
     "django-redis>=7,<8",
     "djangorestframework>=3.18.3,<4",
+    "djangorestframework-simplejwt>=5.5,<6",
+    "drf-spectacular>=0.29,<1",
     "python-dotenv>=1.2.4,<2",
     "redis>=8.1,<9",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["E501"]
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.3.6,<4"]
@@ -24,6 +36,7 @@ test = [
     "pytest-cov>=7.1,<8",
     "pytest-django>=4.14,<5",
     "pytest-xdist>=3.8,<4",
+    "ruff>=0.14,<1",
 ]
 
 [tool.uv]
