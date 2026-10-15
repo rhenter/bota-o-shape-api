@@ -1,0 +1,11 @@
+[run]
+branch = True
+source = apps
+omit =
+    */__init__.py
+    */apps.py
+    */admin.py
+    */migrations/*
+
+[report]
+show_missing = True
